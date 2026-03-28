@@ -1,29 +1,3 @@
-================================================================================
-  BTG PACTUAL - FONDOS DE INVERSIÓN API
-  GUÍA DE DESPLIEGUE EN AWS
-================================================================================
-
-PRERREQUISITOS
-================================================================================
-
-1. Java 17+ instalado
-2. AWS CLI v2 instalado (https://awscli.amazonaws.com/AWSCLIV2.msi)
-3. Podman instalado (https://podman.io/getting-started/installation)
-4. Cuenta AWS con usuario IAM con política AdministratorAccess
-
-VERIFICAR PRERREQUISITOS
-================================================================================
-
-  java --version
-  aws --version
-  aws sts get-caller-identity
-  podman --version
-
-
-================================================================================
-  PASO 1: CONFIGURAR AWS CLI
-================================================================================
-
 1.1 Crear usuario IAM:
   - Ir a: https://console.aws.amazon.com/iam/
   - Personas > Crear usuario > Nombre: btg-fondos-dev
@@ -43,43 +17,18 @@ VERIFICAR PRERREQUISITOS
 
   aws sts get-caller-identity
 
-
-================================================================================
-  PASO 2: DESPLEGAR INFRAESTRUCTURA CON CLOUDFORMATION
-================================================================================
-
-Este comando crea todos los recursos en AWS:
-- 3 tablas DynamoDB (clients, funds, transactions)
-- VPC con 2 subnets públicas + Internet Gateway
-- Application Load Balancer (ALB)
-- ECS Cluster + Fargate Service (2 tareas)
-- ECR Repository (para imágenes Docker)
-- IAM Roles (ejecución y tarea)
-- Security Groups (ALB y ECS)
-- CloudWatch Log Group
-
 COMANDO (ejecutar desde CMD, NO PowerShell):
 
   cd /d U:\Develops\challenge\fondosiversion
 
   aws cloudformation deploy --template-file cloudformation/template.yml --stack-name btg-fondos-dev --parameter-overrides Environment=dev JwtSecret=BTGPactualSuperSecretKeyForJWT2025MustBe256BitsLong!! SenderEmail=spenilla2@gmail.com --capabilities CAPABILITY_NAMED_IAM --region us-east-1
 
-NOTA: Este proceso tarda aproximadamente 5 minutos.
-NOTA: Si PowerShell no reconoce 'aws', usar CMD (Win+R > cmd).
 
 VERIFICAR:
 
   aws cloudformation describe-stacks --stack-name btg-fondos-dev --query "Stacks[0].StackStatus" --region us-east-1
 
 Debe retornar: "CREATE_COMPLETE"
-
-
-================================================================================
-  PASO 3: AGREGAR PERMISOS DE DYNAMODB AL TASK ROLE
-================================================================================
-
-El CloudFormation crea el rol con permisos básicos. Necesitamos agregar
-DescribeTable y CreateTable para que el DataSeeder funcione:
 
   aws iam put-role-policy --role-name btg-fondos-ecs-task-dev --policy-name DynamoDBAccess --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:*\"],\"Resource\":\"*\"},{\"Effect\":\"Allow\",\"Action\":[\"ses:SendEmail\",\"ses:SendRawEmail\"],\"Resource\":\"*\"},{\"Effect\":\"Allow\",\"Action\":[\"sns:Publish\"],\"Resource\":\"*\"}]}"
 
@@ -90,50 +39,15 @@ VERIFICAR:
 Debe retornar: ["dynamodb:*"]
 
 
-================================================================================
-  PASO 4: COMPILAR LA APLICACIÓN
-================================================================================
-
   gradlew bootJar
-
-El JAR se genera en: build/libs/fondosiversion-1.0.0.jar
-
-
-================================================================================
-  PASO 5: CONSTRUIR IMAGEN DOCKER CON PODMAN
-================================================================================
 
   podman build -t btg-fondos-api .
 
-VERIFICAR:
-
-  podman images | findstr btg-fondos-api
-
-
-================================================================================
-  PASO 6: SUBIR IMAGEN A ECR
-================================================================================
-
-6.1 Login en ECR:
-
   aws ecr get-login-password --region us-east-1 | podman login --username AWS --password-stdin 280196252706.dkr.ecr.us-east-1.amazonaws.com
-
-6.2 Etiquetar la imagen:
 
   podman tag btg-fondos-api:latest 280196252706.dkr.ecr.us-east-1.amazonaws.com/btg-fondos-api-dev:latest
 
-6.3 Subir la imagen:
-
   podman push 280196252706.dkr.ecr.us-east-1.amazonaws.com/btg-fondos-api-dev:latest
-
-NOTA: La primera vez puede tardar unos minutos dependiendo de tu conexión.
-
-
-================================================================================
-  PASO 7: DESPLEGAR EN ECS FARGATE
-================================================================================
-
-Forzar nuevo despliegue con la imagen recién subida:
 
   aws ecs update-service --cluster btg-fondos-cluster-dev --service btg-fondos-service-dev --force-new-deployment --region us-east-1
 
@@ -149,254 +63,8 @@ VER LOGS:
 
 Buscar el mensaje: "Seed de datos completado."
 
-
-================================================================================
-  PASO 8: OBTENER URL DEL ALB
-================================================================================
-
   aws elbv2 describe-load-balancers --names btg-fondos-alb-dev --query "LoadBalancers[0].DNSName" --output text --region us-east-1
 
 Resultado ejemplo:
   btg-fondos-alb-dev-487755965.us-east-1.elb.amazonaws.com
 
-
-================================================================================
-  PASO 9: VERIFICAR DESPLIEGUE
-================================================================================
-
-Reemplazar <ALB-URL> con la URL obtenida en el paso 8.
-
-9.1 Health Check:
-
-  curl http://<ALB-URL>/actuator/health
-
-  Debe retornar: {"status":"UP"}
-
-9.2 Swagger UI (abrir en navegador):
-
-  http://<ALB-URL>/swagger-ui.html
-
-9.3 Listar fondos:
-
-  curl http://<ALB-URL>/api/funds
-
-9.4 Login de prueba:
-
-  curl -X POST http://<ALB-URL>/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"demo@btgpactual.com\",\"password\":\"btg2025\"}"
-
-9.5 Login admin:
-
-  curl -X POST http://<ALB-URL>/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"admin@btgpactual.com\",\"password\":\"admin2025\"}"
-
-
-================================================================================
-  PASO 10: CONFIGURAR NOTIFICACIONES
-================================================================================
-
-10.1 Verificar email en SES (para notificaciones por EMAIL):
-  - Ir a: https://console.aws.amazon.com/ses/
-  - Región: US East (N. Virginia) / us-east-1
-  - Configuration > Identities > Create identity > Email address
-  - Ingresar el email y confirmar el link que llega al correo
-  - IMPORTANTE: En modo sandbox, tanto remitente como destinatario
-    deben estar verificados
-
-10.2 Verificar número de teléfono en SNS (para notificaciones por SMS):
-  - Ir a: https://console.aws.amazon.com/sns/
-  - Text messaging (SMS) > Sandbox destination phone numbers
-  - Add phone number > Ingresar número con código de país (+57...)
-  - Confirmar con el código que llega por SMS
-
-
-================================================================================
-  ACTUALIZAR LA APLICACIÓN (RE-DESPLIEGUE)
-================================================================================
-
-Cuando hagas cambios en el código, ejecutar estos comandos en orden:
-
-  gradlew bootJar
-  podman build -t btg-fondos-api .
-  aws ecr get-login-password --region us-east-1 | podman login --username AWS --password-stdin 280196252706.dkr.ecr.us-east-1.amazonaws.com
-  podman tag btg-fondos-api:latest 280196252706.dkr.ecr.us-east-1.amazonaws.com/btg-fondos-api-dev:latest
-  podman push 280196252706.dkr.ecr.us-east-1.amazonaws.com/btg-fondos-api-dev:latest
-  aws ecs update-service --cluster btg-fondos-cluster-dev --service btg-fondos-service-dev --force-new-deployment --region us-east-1
-
-Esperar 2-3 minutos y verificar:
-
-  aws ecs describe-services --cluster btg-fondos-cluster-dev --services btg-fondos-service-dev --query "services[0].{Status:status,Running:runningCount,Desired:desiredCount}" --region us-east-1
-
-
-================================================================================
-  ELIMINAR TODOS LOS RECURSOS (EVITAR COSTOS)
-================================================================================
-
-IMPORTANTE: Ejecutar esto cuando ya no necesites el ambiente.
-
-1. Eliminar imágenes del ECR:
-
-  aws ecr batch-delete-image --repository-name btg-fondos-api-dev --image-ids imageTag=latest --region us-east-1
-
-2. Eliminar el stack completo:
-
-  aws cloudformation delete-stack --stack-name btg-fondos-dev --region us-east-1
-
-3. Verificar eliminación:
-
-  aws cloudformation describe-stacks --stack-name btg-fondos-dev --region us-east-1
-
-  Debe retornar error "Stack does not exist" cuando termine.
-
-NOTA: La eliminación tarda aproximadamente 5-10 minutos.
-
-
-================================================================================
-  RECURSOS CREADOS EN AWS
-================================================================================
-
-  Recurso                  Servicio          Descripción
-  -------                  --------          -----------
-  clients                  DynamoDB          Tabla de clientes
-  funds                    DynamoDB          Tabla de fondos
-  transactions             DynamoDB          Tabla de transacciones (GSI: clientId-index)
-  btg-fondos-vpc-dev       VPC               Red privada 10.0.0.0/16
-  2 subnets públicas       EC2               10.0.1.0/24 y 10.0.2.0/24
-  btg-fondos-alb-dev       ALB               Balanceador de carga (puerto 80 -> 8081)
-  btg-fondos-cluster-dev   ECS               Cluster Fargate
-  btg-fondos-service-dev   ECS               Servicio con 2 tareas (512 CPU, 1024 MB)
-  btg-fondos-api-dev       ECR               Repositorio de imágenes Docker
-  btg-fondos-ecs-exec-dev  IAM               Rol de ejecución ECS
-  btg-fondos-ecs-task-dev  IAM               Rol de tarea (DynamoDB, SES, SNS)
-  /ecs/btg-fondos-dev      CloudWatch        Logs (retención 30 días)
-
-
-================================================================================
-  ENDPOINTS DISPONIBLES
-================================================================================
-
-  Método   Endpoint                  Descripción                Auth
-  ------   --------                  -----------                ----
-  POST     /api/auth/login           Autenticarse               No
-  GET      /api/funds                Listar fondos              No
-  POST     /api/funds/subscribe      Suscribirse a un fondo     JWT (ROLE_CLIENT)
-  POST     /api/funds/cancel         Cancelar suscripción       JWT (ROLE_CLIENT)
-  GET      /api/funds/transactions   Historial transacciones    JWT (ROLE_CLIENT)
-  POST     /api/clients              Crear cliente              JWT (ROLE_ADMIN)
-  GET      /api/clients              Listar clientes            JWT (ROLE_ADMIN)
-  GET      /api/clients/search       Buscar por usuario         JWT (ROLE_ADMIN)
-  GET      /api/clients/{id}         Obtener por ID             JWT
-  PUT      /api/clients/{id}         Actualizar cliente         JWT
-  DELETE   /api/clients/{id}         Eliminar cliente           JWT (ROLE_ADMIN)
-  GET      /actuator/health          Health check               No
-  GET      /swagger-ui.html          Documentación API          No
-
-
-================================================================================
-  USUARIOS DE PRUEBA
-================================================================================
-
-  Usuario          Email                    Password     Rol
-  -------          -----                    --------     ---
-  client-001       demo@btgpactual.com      btg2025      ROLE_CLIENT
-  admin-001        admin@btgpactual.com     admin2025    ROLE_ADMIN
-
-
-================================================================================
-  URLS DE PRODUCCIÓN
-================================================================================
-
-  ALB URL:  http://btg-fondos-alb-dev-487755965.us-east-1.elb.amazonaws.com
-  Swagger:  http://btg-fondos-alb-dev-487755965.us-east-1.elb.amazonaws.com/swagger-ui.html
-  Health:   http://btg-fondos-alb-dev-487755965.us-east-1.elb.amazonaws.com/actuator/health
-  Fondos:   http://btg-fondos-alb-dev-487755965.us-east-1.elb.amazonaws.com/api/funds
-
-
-================================================================================
-  ARQUITECTURA DEL PROYECTO
-================================================================================
-
-  src/main/java/com/btg/fondos/
-  ├── domain/                          # Capa de dominio (núcleo)
-  │   ├── model/                       # Client, Fund, Transaction
-  │   ├── port/
-  │   │   ├── in/                      # FundUseCase, AuthUseCase, ClientUseCase
-  │   │   └── out/                     # ClientRepository, FundRepository, etc.
-  │   └── exception/                   # Excepciones de negocio
-  ├── application/                     # Capa de aplicación
-  │   ├── service/                     # FundService, AuthService, ClientService
-  │   └── dto/                         # Request/Response DTOs
-  └── infrastructure/                  # Capa de infraestructura
-      ├── adapter/
-      │   ├── in/rest/                 # Controllers REST
-      │   └── out/
-      │       ├── persistence/         # Adaptadores DynamoDB
-      │       └── notification/        # Adaptador AWS SES/SNS
-      ├── config/                      # AwsConfig, BeanConfig, SwaggerConfig, DataSeeder
-      └── security/                    # JwtProvider, JwtAuthFilter, SecurityConfig
-
-
-================================================================================
-  SEGURIDAD
-================================================================================
-
-  - Autenticación: JWT Bearer Token (HMAC-SHA256)
-  - Autorización: Roles (ROLE_CLIENT, ROLE_ADMIN) con @PreAuthorize
-  - Encriptación: BCrypt para contraseñas
-  - ROLE_ADMIN: No puede suscribirse/cancelar fondos
-  - ROLE_CLIENT: Puede gestionar sus fondos
-  - DynamoDB SSE: Encriptación en reposo habilitada
-  - ECS: Usuario no-root (appuser) en contenedor
-  - ALB: Puerto 80 público -> 8081 contenedor
-  - Security Groups: Solo ALB puede acceder a ECS
-
-
-================================================================================
-  COSTOS ESTIMADOS (us-east-1)
-================================================================================
-
-  Servicio          Costo aproximado/mes
-  --------          --------------------
-  DynamoDB          ~$0 (PAY_PER_REQUEST, bajo uso)
-  ECS Fargate       ~$30 (2 tareas x 0.5 vCPU x 1GB)
-  ALB               ~$16 (costo fijo + LCU)
-  ECR               ~$0 (< 500MB)
-  CloudWatch        ~$0 (< 5GB logs)
-  SES               ~$0 (< 1000 emails)
-  SNS               ~$0 (< 100 SMS)
-  ---               ---
-  TOTAL ESTIMADO    ~$46/mes
-
-  Para estimar costos exactos: https://calculator.aws
-
-
-================================================================================
-  TROUBLESHOOTING
-================================================================================
-
-1. "aws no se reconoce" en PowerShell:
-   -> Usar CMD en vez de PowerShell (Win+R > cmd)
-
-2. "AccessDenied" en CloudFormation:
-   -> Agregar política AdministratorAccess al usuario IAM
-
-3. "CannotPullContainerError: image not found":
-   -> La imagen no se ha subido a ECR. Ejecutar pasos 4-6.
-
-4. "Unable to load credentials" en ECS:
-   -> Usar DefaultCredentialsProvider en AwsConfig.java
-   -> Verificar que el Task Role tiene los permisos correctos
-
-5. "dynamodb:DescribeTable not authorized":
-   -> Ejecutar el paso 3 (put-role-policy con dynamodb:*)
-
-6. "Email address is not verified" (SES):
-   -> Verificar emails en SES Console (paso 10.1)
-   -> En sandbox, remitente Y destinatario deben estar verificados
-
-7. "Running: 0, Desired: 2":
-   -> Revisar logs: aws logs tail /ecs/btg-fondos-dev --since 5m --region us-east-1
-   -> Forzar redespliegue: aws ecs update-service --cluster btg-fondos-cluster-dev --service btg-fondos-service-dev --force-new-deployment --region us-east-1
-
-8. Puerto ocupado en local:
-   -> Cambiar puerto en application.yml (server.port)
-
-================================================================================
