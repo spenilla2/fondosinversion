@@ -1,0 +1,36 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: btg-fondos-api
+  main:
+    banner-mode: console
+
+# AWS - Sin endpoint override, usa DynamoDB real en la nube
+aws:
+  region: ${AWS_REGION:us-east-1}
+  dynamodb:
+    endpoint:
+
+# JWT
+app:
+  jwt:
+    secret: ${APP_JWT_SECRET:DefaultDevSecretKeyMustBeAtLeast32CharsLong!!}
+    expiration-ms: ${APP_JWT_EXPIRATION:86400000}
+  notification:
+    sender-email: ${APP_SENDER_EMAIL:noreply@btgpactual.com}
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+# Swagger
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
