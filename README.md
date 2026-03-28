@@ -41,12 +41,13 @@ src/main/java/com/btg/fondos/
 ### Tabla: clients
 | Atributo | Tipo | Descripción |
 |---|---|---|
-| id (PK) | String | Identificador único |
+| id (PK) | String | UUID único |
+| user | String | Identificador de usuario (ej: client-001) |
 | name | String | Nombre del cliente |
 | email | String | Correo electrónico |
 | phone | String | Teléfono |
 | balance | Number | Saldo disponible (COP) |
-| preferredNotification | String | EMAIL o SMS |
+| preferredNotification | String | EMAIL, SMS o SNS |
 | subscribedFundIds | StringSet | IDs de fondos suscritos |
 | password | String | Contraseña encriptada (BCrypt) |
 | role | String | ROLE_CLIENT o ROLE_ADMIN |
@@ -72,13 +73,34 @@ src/main/java/com/btg/fondos/
 
 ## Endpoints
 
+### Autenticación
 | Método | Endpoint | Descripción | Auth |
 |---|---|---|---|
-| POST | /api/auth/login | Autenticarse | No |
-| GET | /api/funds | Listar fondos | No |
-| POST | /api/funds/subscribe | Suscribirse a un fondo | JWT |
-| POST | /api/funds/cancel | Cancelar suscripción | JWT |
-| GET | /api/funds/transactions | Historial de transacciones | JWT |
+| POST | /api/auth/login | Autenticarse y obtener JWT | No |
+
+### Fondos
+| Método | Endpoint | Descripción | Auth |
+|---|---|---|---|
+| GET | /api/funds | Listar fondos disponibles | No |
+| POST | /api/funds/subscribe | Suscribirse a un fondo | JWT (ROLE_CLIENT) |
+| POST | /api/funds/cancel | Cancelar suscripción | JWT (ROLE_CLIENT) |
+| GET | /api/funds/transactions | Historial de transacciones | JWT (ROLE_CLIENT) |
+
+### Clientes
+| Método | Endpoint | Descripción | Auth |
+|---|---|---|---|
+| POST | /api/clients | Crear cliente | JWT (ROLE_ADMIN) |
+| GET | /api/clients | Listar todos los clientes | JWT (ROLE_ADMIN) |
+| GET | /api/clients/search?user= | Buscar cliente por usuario | JWT (ROLE_ADMIN) |
+| GET | /api/clients/{id} | Obtener cliente por ID | JWT (ADMIN o propio) |
+| PUT | /api/clients/{id} | Actualizar cliente | JWT (ADMIN o propio) |
+| DELETE | /api/clients/{id} | Eliminar cliente | JWT (ROLE_ADMIN) |
+
+### Monitoreo
+| Método | Endpoint | Descripción | Auth |
+|---|---|---|---|
+| GET | /actuator/health | Health check | No |
+| GET | /swagger-ui.html | Documentación API | No |
 
 ## Ejecución Local
 
@@ -100,11 +122,21 @@ http://localhost:8081/swagger-ui.html
 ### Actuator
 http://localhost:8081/actuator/health
 
-## Cliente de Prueba
+## Usuarios de Prueba
 
-- Email: `demo@btgpactual.com`
-- Password: `btg2025`
-- Saldo inicial: COP $500.000
+| Usuario | Email | Password | Rol |
+|---|---|---|---|
+| client-001 | demo@btgpactual.com | btg2025 | ROLE_CLIENT |
+| admin-001 | admin@btgpactual.com | admin2025 | ROLE_ADMIN |
+
+## Reglas de Negocio
+
+- Saldo inicial de cada cliente: COP $500.000
+- Cada fondo tiene un monto mínimo de vinculación
+- Si no hay saldo suficiente: "No tiene saldo disponible para vincularse al fondo \<nombre\>"
+- Al cancelar suscripción, el monto se devuelve al saldo del cliente
+- ROLE_ADMIN no puede suscribirse ni cancelar fondos
+- Notificación por EMAIL (SES) o SMS (SNS) según preferencia del cliente
 
 ## Seguridad
 
